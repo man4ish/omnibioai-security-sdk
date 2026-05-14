@@ -1,0 +1,12 @@
+[project]
+name = "omnibioai-security-sdk"
+version = "0.1.0"
+description = "Zero-trust security SDK for OmniBioAI ecosystem"
+requires-python = ">=3.10"
+
+dependencies = [
+    "httpx",
+    "redis",
+    "pyjwt",
+    "starlette"
+]

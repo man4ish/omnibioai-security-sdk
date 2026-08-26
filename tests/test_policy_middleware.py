@@ -1,10 +1,11 @@
-"""TestClient-based integration tests for middleware/policy.py PolicyMiddleware."""
+"""Async integration tests for middleware/policy.py PolicyMiddleware."""
+import json
 import sys
 import types
 import importlib
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from starlette.testclient import TestClient
+from starlette.requests import Request
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -42,23 +43,42 @@ def _make_app(policy_client):
     return app
 
 
-def test_policy_middleware_allows():
+@pytest.mark.asyncio
+async def test_policy_middleware_allows():
     mock_policy = MagicMock()
     mock_policy.evaluate = AsyncMock(return_value={"allow": True, "reason": "ok"})
     app = _make_app(mock_policy)
-    client = TestClient(app, raise_server_exceptions=False)
+    middleware = PolicyMiddleware(app, policy=mock_policy)
+    request = Request({
+        "type": "http", "method": "GET", "path": "/test",
+        "headers": [], "query_string": b"",
+    })
+
+    async def call_next(_request):
+        return JSONResponse({"ok": True})
+
     with patch("middleware.policy.get_user", return_value={"user_id": "u1", "roles": ["researcher"]}):
-        resp = client.get("/test")
+        resp = await middleware.dispatch(request, call_next)
     assert resp.status_code == 200
 
 
-def test_policy_middleware_denies():
+@pytest.mark.asyncio
+async def test_policy_middleware_denies():
     mock_policy = MagicMock()
     mock_policy.evaluate = AsyncMock(return_value={"allow": False, "reason": "forbidden"})
     app = _make_app(mock_policy)
-    client = TestClient(app, raise_server_exceptions=False)
+    middleware = PolicyMiddleware(app, policy=mock_policy)
+    request = Request({
+        "type": "http", "method": "GET", "path": "/test",
+        "headers": [], "query_string": b"",
+    })
+
+    async def call_next(_request):
+        return JSONResponse({"ok": True})
+
     with patch("middleware.policy.get_user", return_value={"user_id": "u2", "roles": []}):
-        resp = client.get("/test")
+        resp = await middleware.dispatch(request, call_next)
+    body = json.loads(resp.body)
     assert resp.status_code == 403
-    assert resp.json()["error"] == "forbidden"
-    assert resp.json()["reason"] == "forbidden"
+    assert body["error"] == "forbidden"
+    assert body["reason"] == "forbidden"

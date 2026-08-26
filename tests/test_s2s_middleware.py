@@ -1,10 +1,10 @@
-"""TestClient-based integration tests for middleware/s2s.py ServiceAuthMiddleware."""
+"""Async integration tests for middleware/s2s.py ServiceAuthMiddleware."""
+import httpx
 import sys
 import types
 import importlib
 import jwt
 import pytest
-from starlette.testclient import TestClient
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -50,31 +50,37 @@ def _token(service="tes", aud=None):
     return jwt.encode({"service": service, "aud": aud or [SERVICE]}, SECRET, algorithm="HS256")
 
 
-def test_s2s_missing_token():
-    client = TestClient(_make_app(), raise_server_exceptions=False)
-    resp = client.get("/test")
+async def _get(path="/test", headers=None):
+    transport = httpx.ASGITransport(app=_make_app())
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        return await client.get(path, headers=headers)
+
+
+@pytest.mark.asyncio
+async def test_s2s_missing_token():
+    resp = await _get()
     assert resp.status_code == 401
     assert "missing service token" in resp.json()["error"]
 
 
-def test_s2s_invalid_token():
-    client = TestClient(_make_app(), raise_server_exceptions=False)
-    resp = client.get("/test", headers={"X-Service-Token": "bad.token"})
+@pytest.mark.asyncio
+async def test_s2s_invalid_token():
+    resp = await _get(headers={"X-Service-Token": "bad.token"})
     assert resp.status_code == 401
     assert "invalid service token" in resp.json()["error"]
 
 
-def test_s2s_wrong_audience():
+@pytest.mark.asyncio
+async def test_s2s_wrong_audience():
     token = _token(aud=["other-service"])
-    client = TestClient(_make_app(), raise_server_exceptions=False)
-    resp = client.get("/test", headers={"X-Service-Token": token})
+    resp = await _get(headers={"X-Service-Token": token})
     assert resp.status_code == 403
     assert "service not allowed" in resp.json()["error"]
 
 
-def test_s2s_valid_token_passes():
+@pytest.mark.asyncio
+async def test_s2s_valid_token_passes():
     token = _token(service="tes", aud=[SERVICE])
-    client = TestClient(_make_app(), raise_server_exceptions=False)
-    resp = client.get("/test", headers={"X-Service-Token": token})
+    resp = await _get(headers={"X-Service-Token": token})
     assert resp.status_code == 200
     assert resp.json()["service"] == "tes"
